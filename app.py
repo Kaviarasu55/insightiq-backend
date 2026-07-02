@@ -15,7 +15,7 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app, origins=[
     "http://localhost:5173",
-    "https://insightiqk.netlify.app/"
+    "https://insightiqk.netlify.app"
 ])
 
 # Initialize Firebase Admin
