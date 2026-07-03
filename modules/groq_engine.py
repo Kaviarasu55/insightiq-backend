@@ -211,7 +211,7 @@ If something is not in the statistics, say so honestly."""
 
     # Build messages array: system prompt + full history + new message
     messages = [{"role": "system", "content": system_prompt}]
-    messages.extend(chat_history)  # all previous messages
+    messages.extend(chat_history[-10:])  # limit to 10 messages to avoid token overflow 
     messages.append({"role": "user", "content": user_message})
 
     try:
