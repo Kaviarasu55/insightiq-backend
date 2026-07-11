@@ -13,13 +13,11 @@ load_dotenv()
 
 # Create Flask app
 app = Flask(__name__)
-CORS(app, origins=[
-    "http://localhost:5173",
-    "https://insightiqk.netlify.app"
-])
+CORS(app, origins=["http://localhost:5173", "https://insightiqk.netlify.app"])
 
 # Initialize Firebase Admin
 import json
+
 firebase_cred_json = os.getenv("FIREBASE_CREDENTIALS_JSON")
 cred = credentials.Certificate(json.loads(firebase_cred_json))
 if not firebase_admin._apps:
@@ -552,6 +550,8 @@ def ml_train(dataset_id):
                 "feature_columns": model_result["feature_columns"],
                 "model_name": model_result["model_name"],
                 "column_unique_values": column_unique_values,
+                "small_sample_warning": model_result.get("small_sample_warning"),
+                "excluded_columns": model_result.get("dropped_id_cols"),
             }
         )
     except Exception as e:
@@ -631,6 +631,8 @@ def automl(dataset_id):
                 "results": result["results"],
                 "best_model": result["best_model"],
                 "groq_explanation": groq_explanation,
+                "small_sample_warning": result.get("small_sample_warning"),
+                "excluded_columns": result.get("dropped_id_cols"),
             }
         )
     except Exception as e:

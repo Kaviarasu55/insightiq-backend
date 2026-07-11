@@ -23,50 +23,58 @@ def detect_task_type(df, target_col):
 
 
 def prepare_data(df, target_col):
-    # Drop rows where target is null — can't train on missing labels
     df = df.dropna(subset=[target_col]).copy()
-
-    # Separate features (X) and target (y)
     X = df.drop(columns=[target_col])
     y = df[target_col]
-
-    # Drop columns that are entirely null
     X = X.dropna(axis=1, how="all")
 
-    # Encode categorical columns to numbers
-    # Store encoders so we can use them for new predictions
+    # NEW: drop identifier-like columns before they're used as features
+    id_like = []
+    for col in X.columns:
+        name_hints_id = col.lower() in ("id", "index") or col.lower().endswith("_id")
+        looks_unique_sequential = pd.api.types.is_numeric_dtype(X[col]) and X[
+            col
+        ].nunique() == len(X)
+        if name_hints_id or looks_unique_sequential:
+            id_like.append(col)
+    X = X.drop(columns=id_like)
+
+    # Impute missing numeric values (LogisticRegression etc. can't handle NaN natively)
+    for col in X.columns:
+      if pd.api.types.is_numeric_dtype(X[col]) and X[col].isna().any():
+       X[col] = X[col].fillna(X[col].median())
+
     encoders = {}
-    for col in X.select_dtypes(include="object").columns:
-        le = LabelEncoder()
-        X[col] = le.fit_transform(X[col].astype(str))
-        encoders[col] = le
-
-    # Encode target if classification (text labels → numbers)
+    for col in X.columns:
+        if not pd.api.types.is_numeric_dtype(X[col]):
+            le = LabelEncoder()
+            X[col] = le.fit_transform(X[col].astype(str))
+            encoders[col] = le
     target_encoder = None
-    if y.dtype == "object":
+    if not pd.api.types.is_numeric_dtype(y):
         target_encoder = LabelEncoder()
-        y = target_encoder.fit_transform(y.astype(str))
+        y = target_encoder.fit_transform(y)
+    return X, y, encoders, target_encoder, id_like  # surface what was dropped
 
-    # Fill remaining nulls with column median
-    X = X.fillna(X.median(numeric_only=True))
 
-    return X, y, encoders, target_encoder
+CLASSIFICATION_MODELS = {"Logistic Regression", "Random Forest", "Gradient Boosting"}
+REGRESSION_MODELS = {
+    "Linear Regression",
+    "Random Forest Regressor",
+    "Gradient Boosting Regressor",
+}
 
 
 def get_model_by_name(model_name, task_type):
-    # Returns correct model object based on AutoML recommendation
-    # If model_name not found — falls back to Random Forest safely
     from sklearn.linear_model import LogisticRegression, LinearRegression
     from sklearn.ensemble import GradientBoostingClassifier, GradientBoostingRegressor
 
     model_map = {
-        # Classification models
         "Logistic Regression": LogisticRegression(max_iter=1000, random_state=42),
         "Random Forest": RandomForestClassifier(n_estimators=100, random_state=42),
         "Gradient Boosting": GradientBoostingClassifier(
             n_estimators=100, random_state=42
         ),
-        # Regression models
         "Linear Regression": LinearRegression(),
         "Random Forest Regressor": RandomForestRegressor(
             n_estimators=100, random_state=42
@@ -76,10 +84,13 @@ def get_model_by_name(model_name, task_type):
         ),
     }
 
-    if model_name and model_name in model_map:
+    valid_names = (
+        CLASSIFICATION_MODELS if task_type == "classification" else REGRESSION_MODELS
+    )
+
+    if model_name and model_name in valid_names:
         return model_map[model_name]
 
-    # Safe fallback if model name not recognized
     if task_type == "classification":
         return RandomForestClassifier(n_estimators=100, random_state=42)
     return RandomForestRegressor(n_estimators=100, random_state=42)
@@ -89,12 +100,26 @@ def train_model(df, target_col, preferred_model=None):
     # Main function — trains model and returns results
 
     task_type = detect_task_type(df, target_col)
-    X, y, encoders, target_encoder = prepare_data(df, target_col)
+    X, y, encoders, target_encoder, dropped_id_cols = prepare_data(df, target_col)
+
+    # Stratify classification splits so both classes appear in test set
+    stratify_arg = (
+        y
+        if task_type == "classification" and pd.Series(y).value_counts().min() >= 2
+        else None
+    )
 
     # Split into train/test sets
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
+        X, y, test_size=0.2, random_state=42, stratify=stratify_arg
     )
+
+    # Flag unreliable test sizes
+    small_sample_warning = None
+    if len(X_test) < 20:
+        small_sample_warning = (
+            f"Test set is only {len(X_test)} rows — metrics may not be reliable."
+        )
 
     # Pick model — use AutoML recommendation if available
     # Otherwise fall back to Random Forest
@@ -108,10 +133,11 @@ def train_model(df, target_col, preferred_model=None):
 
     # Calculate metrics
     if task_type == "classification":
+        cm = confusion_matrix(y_test, y_pred)
         metrics = {
             "accuracy": round(accuracy_score(y_test, y_pred), 4),
             "f1_score": round(f1_score(y_test, y_pred, average="weighted"), 4),
-            "confusion_matrix": confusion_matrix(y_test, y_pred).tolist(),
+            "confusion_matrix": {str(i): row.tolist() for i, row in enumerate(cm)},
         }
     else:
         metrics = {
@@ -131,6 +157,7 @@ def train_model(df, target_col, preferred_model=None):
         "encoders": encoders,
         "target_encoder": target_encoder,
         "feature_columns": X.columns.tolist(),
+        "dropped_id_cols": dropped_id_cols,
         # Track which model was actually used
         "model_name": preferred_model
         or (
@@ -138,6 +165,7 @@ def train_model(df, target_col, preferred_model=None):
             if task_type == "classification"
             else "Random Forest Regressor"
         ),
+        "small_sample_warning": small_sample_warning,
     }
 
 
