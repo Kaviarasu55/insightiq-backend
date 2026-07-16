@@ -44,8 +44,11 @@ def run_automl(df, target_col):
 
         if task_type == "classification":
             try:
-                scores = cross_val_score(model, X, y, cv=3, scoring=scoring)
-                f1_scores = cross_val_score(model, X, y, cv=3, scoring="f1_weighted")
+                from sklearn.model_selection import cross_validate
+                # (add this import near your other sklearn imports at the top)
+                cv_results = cross_validate(model, X, y, cv=3, scoring=["accuracy", "f1_weighted"])
+                scores = cv_results["test_accuracy"]
+                f1_scores = cv_results["test_f1_weighted"]
             except ValueError as e:
                 raise ValueError(
                     f"Cannot run AutoML: {e}. This usually means one class "
