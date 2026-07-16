@@ -99,7 +99,7 @@ def run_automl(df, target_col):
 def get_classification_models():
     # Returns list of (name, model) tuples
     return [
-        ("Logistic Regression", LogisticRegression(max_iter=200, solver="liblinear", random_state=42)),
+        ("Logistic Regression", LogisticRegression(max_iter=200, solver="saga", random_state=42)),
         (
             "Random Forest",
             RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1),
